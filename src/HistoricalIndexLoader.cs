@@ -1,8 +1,7 @@
-// src/HistoricalIndexLoader.cs
 using System;
-using System.Linq;
+using System.Collections.Generic;
 using Newtonsoft.Json;
-using HistoricalBordersPlugin.Utils; // HttpFetcher / LocalCache の namespace に合わせて
+using HistoricalBordersPlugin.Utils;
 
 namespace HistoricalBordersPlugin
 {
@@ -11,48 +10,55 @@ namespace HistoricalBordersPlugin
         private const string IndexUrl =
             "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/index.json";
 
-        private static readonly object _lock = new();
-        private static HistoricalIndex? _index;
+        private static List<HistoricalIndexEntry>? _entries;
 
-        public static HistoricalIndex Index
+        public static List<HistoricalIndexEntry> Load()
         {
-            get
-            {
-                EnsureLoaded();
-                return _index!;
-            }
+            if (_entries != null) return _entries;
+
+            string json = HttpFetcher.GetStringAsync(IndexUrl).GetAwaiter().GetResult();
+            var root = JsonConvert.DeserializeObject<HistoricalIndexRoot>(json);
+
+            _entries = root?.Years ?? new List<HistoricalIndexEntry>();
+            return _entries;
         }
 
-        private static void EnsureLoaded()
+        public static HistoricalIndexEntry? GetClosestEntry(int year)
         {
-            if (_index != null) return;
+            var list = Load();
+            if (list.Count == 0) return null;
 
-            lock (_lock)
+            HistoricalIndexEntry? best = null;
+            int bestDiff = int.MaxValue;
+
+            foreach (var e in list)
             {
-                if (_index != null) return;
-
-                string json;
-                if (LocalCache.TryReadCache(IndexUrl, out var cached) && !string.IsNullOrWhiteSpace(cached))
+                int diff = Math.Abs(e.Year - year);
+                if (diff < bestDiff)
                 {
-                    json = cached!;
+                    bestDiff = diff;
+                    best = e;
                 }
-                else
-                {
-                    // 同期的に取得（プラグイン側から await しないため）
-                    json = Utils.HttpFetcher.GetStringAsync(IndexUrl).GetAwaiter().GetResult();
-                    LocalCache.WriteCacheAsync(IndexUrl, json).GetAwaiter().GetResult();
-                }
-
-                _index = JsonConvert.DeserializeObject<HistoricalIndex>(json) ?? new HistoricalIndex();
-                _index.Years = _index.Years.OrderBy(y => y.Year).ToList();
             }
-        }
-
-        public static HistoricalYearEntry? GetClosestEntry(int year)
-        {
-            var idx = Index;
-            return idx.Years.OrderBy(y => Math.Abs(y.Year - year)).FirstOrDefault();
+            return best;
         }
     }
-}
 
+    internal class HistoricalIndexRoot
+    {
+        [JsonProperty("years")]
+        public List<HistoricalIndexEntry> Years { get; set; } = new();
+    }
+
+    internal class HistoricalIndexEntry
+    {
+        [JsonProperty("year")]
+        public int Year { get; set; }
+
+        [JsonProperty("filename")]
+        public string Filename { get; set; } = "";
+
+        [JsonProperty("countries")]
+        public List<string> Countries { get; set; } = new();
+    }
+}
