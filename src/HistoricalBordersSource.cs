@@ -3,114 +3,66 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using YukkuriMovieMaker.Commons;
-using YukkuriMovieMaker.Player.Video;
-using YukkuriMovieMaker.Plugin.Shape;
-using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Player;
+using YukkuriMovieMaker.Plugin;
 
 namespace HistoricalBordersPlugin
 {
-    internal class HistoricalBordersSource : IShapeSource, IDisposable
+    public class HistoricalBordersSource : IShapeSource
     {
-        private readonly IGraphicsDevicesAndContext devices;
-        private readonly HistoricalBordersParameter parameter;
+        private readonly HistoricalBordersParameter _parameter;
 
-        // Path キャッシュ（年ごと）
-        private readonly Dictionary<int, IGeometry> geometryCache = new();
-
-        public HistoricalBordersSource(IGraphicsDevicesAndContext devices, HistoricalBordersParameter parameter)
+        public HistoricalBordersSource(HistoricalBordersParameter parameter)
         {
-            this.devices = devices;
-            this.parameter = parameter;
+            _parameter = parameter;
         }
 
-        public void Dispose()
+        public IReadOnlyList<EditableVertex[]> BuildVertices(RenderInfo info)
         {
-            foreach (var g in geometryCache.Values)
-                g.Dispose();
-            geometryCache.Clear();
-        }
+            int year = (int)_parameter.Year.CurrentValue;
+            string? filter = _parameter.CountryFilter;
 
-        public void Draw(IShapeRenderContext context)
-        {
-            int year = (int)parameter.Year.CurrentValue;
-            double glow = parameter.Glow.CurrentValue;
+            var entry = HistoricalIndexLoader.GetClosestEntry(year);
+            if (entry == null)
+                return Array.Empty<EditableVertex[]>();
 
-            // ■ 対象年の GeoJSON Path を取得
-            var geo = GetOrLoadGeometry(year, parameter.CountryFilter);
+            var polygons = GeoJsonLoader.GetPolygons(entry.Filename, filter);
+            if (polygons.Count == 0)
+                return Array.Empty<EditableVertex[]>();
 
-            if (geo == null)
-                return;
+            List<EditableVertex[]> list = new();
 
-            // ■ 塗りつぶし
-            if (parameter.FillEnabled)
+            foreach (var ring in polygons)
             {
-                using var fillBrush = devices.CreateBrush(parameter.FillColor);
-                context.DrawingContext.FillGeometry(geo, fillBrush);
+                var verts = ring
+                    .Select(v => ConvertLatLonToLocal(v, info))
+                    .Select(pt => new EditableVertex(pt))
+                    .ToArray();
+
+                list.Add(verts);
             }
 
-            // ■ Glow（外側に太い線）
-            if (glow > 0)
-            {
-                using var glowBrush = devices.CreateBrush(new Color4(
-                    parameter.BorderColor.R,
-                    parameter.BorderColor.G,
-                    parameter.BorderColor.B,
-                    0.4f
-                ));
-
-                context.DrawingContext.DrawGeometry(
-                    geo,
-                    glowBrush,
-                    (float)(2f + glow * 0.15f)
-                );
-            }
-
-            // ■ 境界線
-            using var borderBrush = devices.CreateBrush(parameter.BorderColor);
-            context.DrawingContext.DrawGeometry(
-                geo,
-                borderBrush,
-                2.0f
-            );
+            return list;
         }
 
         /// <summary>
-        /// 描画用 PathGeometry を取得 or ロード
+        /// WGS84 座標（lon,lat）を YMM4 のローカル座標（-1〜1）へマッピングする
         /// </summary>
-        private IGeometry? GetOrLoadGeometry(int year, string filter)
+        private static Vector2 ConvertLatLonToLocal(Vector2 lonlat, RenderInfo info)
         {
-            if (geometryCache.TryGetValue(year, out var cached))
-                return cached;
+            float x = lonlat.X / 180f;   // -180〜180 → -1〜1
+            float y = lonlat.Y / 90f;    // -90〜90   → -1〜1
 
-            // GeoJSON 取得
-            var index = HistoricalIndexLoader.Index;
-            if (index == null)
-                return null;
+            // 画角補正（Shape 内で縦横比が違う）
+            float ar = info.AspectRatio;
+            if (ar > 1f) x /= ar;
+            else y *= ar;
 
-            var entry = index.Years.OrderBy(y => Math.Abs(y.Year - year)).FirstOrDefault();
-            if (entry == null)
-                return null;
-
-            var geojson = HistoricalIndexLoader.GetGeoJson(entry.Filename, filter);
-            if (geojson == null || geojson.Count == 0)
-                return null;
-
-            // PathGeometry に変換
-            var geo = devices.CreatePathGeometry();
-
-            foreach (var poly in geojson)
-            {
-                geo.BeginFigure(poly[0], false);
-
-                for (int i = 1; i < poly.Count; i++)
-                    geo.AddLine(poly[i]);
-
-                geo.EndFigure(true);
-            }
-
-            geometryCache[year] = geo;
-            return geo;
+            return new Vector2(x, -y); // Y 軸反転
         }
+
+        // 境界線色・塗り潰しなど YMM4 が自動処理するパラメータ
+        public bool CanFill => true;
+        public bool CanStroke => true;
     }
 }
-
