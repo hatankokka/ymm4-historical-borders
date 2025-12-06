@@ -1,1 +1,14 @@
+# Build outputs
+bin/
+obj/
+.vs/
+
+# Visual Studio files
+*.user
+*.suo
+
+# Cache files
+*.cache
+*.tmp
+*.log
 
