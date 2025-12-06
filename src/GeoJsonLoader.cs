@@ -1,102 +1,69 @@
-// src/GeoJsonLoader.cs
 using System;
 using System.Collections.Generic;
-using System.Numerics;
+using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using HistoricalBordersPlugin.Utils;
 
 namespace HistoricalBordersPlugin
 {
-    internal static class GeoJsonLoader
+    public static class HistoricalIndexLoader
     {
-        private const string BaseUrl =
-            "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson/";
+        private const string IndexUrl =
+            "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/index.json";
 
-        // filename + filter をキーにキャッシュ
-        private static readonly Dictionary<string, List<Vector2[]>> _cache = new(StringComparer.OrdinalIgnoreCase);
+        private static List<HistoricalIndexEntry>? _entries;
 
-        public static List<Vector2[]> GetPolygons(string filename, string? countryFilter)
+        /// <summary>
+        /// 年代に最も近いデータを返す
+        /// </summary>
+        public static HistoricalIndexEntry? GetClosestEntry(int year)
         {
-            var key = $"{filename}::{countryFilter ?? ""}";
-            lock (_cache)
-            {
-                if (_cache.TryGetValue(key, out var cached))
-                    return cached;
-            }
+            EnsureLoaded();
 
-            var url = BaseUrl + filename;
+            if (_entries == null || _entries.Count == 0)
+                return null;
+
+            // 差の絶対値が最小のものを返す
+            return _entries
+                .OrderBy(e => Math.Abs(e.Year - year))
+                .FirstOrDefault();
+        }
+
+        private static void EnsureLoaded()
+        {
+            if (_entries != null) return;
+
+            // キャッシュ利用
             string json;
-            if (LocalCache.TryReadCache(url, out var cachedJson) && !string.IsNullOrWhiteSpace(cachedJson))
+            if (LocalCache.TryReadCache(IndexUrl, out var cached) && !string.IsNullOrEmpty(cached))
             {
-                json = cachedJson!;
+                json = cached!;
             }
             else
             {
-                json = HttpFetcher.GetStringAsync(url).GetAwaiter().GetResult();
-                LocalCache.WriteCacheAsync(url, json).GetAwaiter().GetResult();
+                json = HttpFetcher.GetStringAsync(IndexUrl).GetAwaiter().GetResult();
+                LocalCache.WriteCacheAsync(IndexUrl, json).GetAwaiter().GetResult();
             }
 
-            var fc = JsonConvert.DeserializeObject<GeoJsonFeatureCollection>(json);
-            var result = new List<Vector2[]>();
+            var root = JObject.Parse(json);
+            var arr = (JArray)root["years"]!;
 
-            if (fc != null)
-            {
-                foreach (var feature in fc.Features)
+            _entries = arr
+                .Select(item => new HistoricalIndexEntry
                 {
-                    // 国名フィルタ
-                    if (!string.IsNullOrWhiteSpace(countryFilter) &&
-                        feature.Properties.TryGetValue("NAME", out var nameObj))
-                    {
-                        var name = Convert.ToString(nameObj);
-                        if (string.IsNullOrEmpty(name) ||
-                            !name.Contains(countryFilter, StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue;
-                        }
-                    }
-
-                    if (feature.Geometry?.Coordinates is not JToken coords)
-                        continue;
-
-                    switch (feature.Geometry.Type)
-                    {
-                        case "Polygon":
-                            ExtractPolygon(coords, result);
-                            break;
-                        case "MultiPolygon":
-                            foreach (var poly in coords)
-                                ExtractPolygon(poly, result);
-                            break;
-                    }
-                }
-            }
-
-            lock (_cache)
-            {
-                _cache[key] = result;
-            }
-
-            return result;
-        }
-
-        private static void ExtractPolygon(JToken coords, List<Vector2[]> dest)
-        {
-            // Polygon: [ [ [lon,lat], ... ] , [hole] ... ]
-            var outerRing = coords.First; // とりあえず外周だけ
-            if (outerRing is not JArray arr) return;
-
-            var pts = new List<Vector2>();
-            foreach (var pt in arr)
-            {
-                if (pt is not JArray xy || xy.Count < 2) continue;
-                var lon = xy[0]!.Value<double>();
-                var lat = xy[1]!.Value<double>();
-                pts.Add(new Vector2((float)lon, (float)lat));
-            }
-            if (pts.Count > 2)
-                dest.Add(pts.ToArray());
+                    Year = item["year"]!.Value<int>(),
+                    Filename = item["filename"]!.Value<string>()!,
+                    Countries = item["countries"]!.Select(c => c.Value<string>()!).ToList()
+                })
+                .ToList();
         }
     }
-}
 
+    public class HistoricalIndexEntry
+    {
+        public int Year { get; set; }
+        public string Filename { get; set; } = "";
+        public List<string> Countries { get; set; } = new();
+    }
+}
