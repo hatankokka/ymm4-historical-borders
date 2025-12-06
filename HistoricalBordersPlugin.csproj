@@ -6,15 +6,13 @@
     <RootNamespace>HistoricalBordersPlugin</RootNamespace>
     <OutputType>Library</OutputType>
     <LangVersion>latest</LangVersion>
-  </PropertyGroup>
 
-  <ItemGroup>
-    <Compile Include="src\**\*.cs" />
-  </ItemGroup>
+    <!-- SDK のデフォルトコンパイルを使うため明示的な Compile は書かない -->
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+  </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
 </Project>
-
