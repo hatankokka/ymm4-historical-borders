@@ -6,9 +6,6 @@
     <RootNamespace>HistoricalBordersPlugin</RootNamespace>
     <OutputType>Library</OutputType>
     <LangVersion>latest</LangVersion>
-
-    <!-- SDK のデフォルトコンパイルを使うため明示的な Compile は書かない -->
-    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
   </PropertyGroup>
 
   <ItemGroup>
