@@ -1,1 +1,13 @@
+{
+  "FormatVersion": 1,
+  "PluginName": "HistoricalBordersPlugin",
+  "PluginVersion": "1.0.0",
+  "MinimumYMMVersion": "4.0.0",
+  "Author": "motoy",
+  "Description": "歴史的な国境データ（GeoJSON）を読み込み、任意の年の国境線をYMM4上に描画するプラグイン。",
+  
+  "Assemblies": [
+    "HistoricalBordersPlugin.dll"
+  ]
+}
 
